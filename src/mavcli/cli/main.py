@@ -31,7 +31,7 @@ except Exception:
 @click.command()
 @click.option('--text-only', is_flag=True, help='Run in text-only mode (no audio)')
 @click.option('--persona', default=DEFAULT_PERSONA_PATH, help='Path to persona YAML file')
-@click.option('--model', default='llama3.1:8b', help='Ollama model name')
+@click.option('--model', default='qwen2.5:7b', help='Ollama model name')
 @click.option('--stt-model', default='medium', help='Whisper model size')
 @click.option('--tts-model', default='en_US-lessac-medium', help='Piper TTS voice model')
 @click.option('--log-level', default='INFO', help='Logging level')
@@ -98,9 +98,9 @@ def main(text_only: bool, persona: str, model: str, stt_model: str, tts_model: s
                 if not user_input:
                     continue
             else:
+                # Listening stage
+                print("\rListening...", end='', flush=True)
                 # Record audio from microphone
-                logger.info("Listening... (speak now)")
-                # Record 5 seconds of audio at 16kHz
                 duration = 5  # seconds
                 sample_rate = 16000
                 audio = sd.rec(int(duration * sample_rate), samplerate=sample_rate, channels=1, dtype='float32')
@@ -108,11 +108,13 @@ def main(text_only: bool, persona: str, model: str, stt_model: str, tts_model: s
                 audio = audio.flatten()  # Convert to 1D array
 
                 # Transcribe audio
-                logger.info("Transcribing...")
+                print("\rThinking...", end='', flush=True)
                 user_input = stt_engine.transcribe(audio, sample_rate)
                 logger.info(f"You said: {user_input}")
                 if not user_input:
                     logger.info("No speech detected, continuing...")
+                    # Go back to listening for the next turn
+                    print("\rListening...", end='', flush=True)
                     continue
                 if user_input.lower() in ['exit', 'quit', 'bye']:
                     logger.info("User exited conversation")
@@ -122,7 +124,8 @@ def main(text_only: bool, persona: str, model: str, stt_model: str, tts_model: s
             conversation_history.append({"role": "user", "content": user_input})
 
             # Generate LLM response with system prompt
-            logger.info("Generating response...")
+            if text_only:
+                print("Thinking...")
             # Prepare messages for Ollama chat: system prompt + conversation history
             messages = [{"role": "system", "content": system_prompt}] + conversation_history
             llm_response = llm_engine.chat(messages)
@@ -135,12 +138,14 @@ def main(text_only: bool, persona: str, model: str, stt_model: str, tts_model: s
             if text_only:
                 print(f"\nAssistant: {llm_response}")
             else:
-                # Synthesize and play audio
-                logger.info("Synthesizing speech...")
+                # Speaking stage
+                print("\rSpeaking...", end='', flush=True)
                 audio_response = tts_engine.synthesize(llm_response)
                 # Play audio (assuming 22050 Hz for Piper)
                 sd.play(audio_response, samplerate=22050)
                 sd.wait()
+                # After speaking, we will go back to listening for the next turn
+                # The next iteration will start with Listening... so we don't print it here.
 
     except KeyboardInterrupt:
         logger.info("Conversation interrupted by user")
