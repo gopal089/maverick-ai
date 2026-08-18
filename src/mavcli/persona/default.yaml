@@ -67,3 +67,5 @@ limitations: >
 
 voice_model: "en_US-lessac-medium"
 llm_model: "qwen2.5:7b"
+# Web search provider: "tavily" (default) or "brave"
+search_provider: "brave"

@@ -155,7 +155,9 @@ def main(text_only: bool, persona: str, model: str, stt_model: str, tts_model: s
             search_results = None
             if needs_web_search(user_input):
                 try:
-                    search_results = web_search(user_input)
+                    # Get search provider from persona config, default to tavily
+                    search_provider = persona_config.get('search_provider', 'tavily') if persona_config else 'tavily'
+                    search_results = web_search(user_input, search_provider=search_provider)
                     logger.info(f"Web search triggered for: {user_input}")
                 except Exception as e:
                     logger.error(f"Web search failed: {e}")

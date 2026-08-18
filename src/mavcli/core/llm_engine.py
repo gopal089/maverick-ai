@@ -155,6 +155,8 @@ class LLMEngine:
                         if function_name in TOOLS:
                             if function_name == "web_search":
                                 query = function_args.get('query', '')
+                                # Note: In the LLM engine context, we don't have direct access to persona config
+                                # The search provider will be determined by environment variable or default to tavily
                                 result = web_search(query)
 
                                 # Add tool result to messages

@@ -41,20 +41,43 @@ ollama pull mistral
 
 ### Web Search Setup (Optional)
 
-To enable real-time web search capabilities, you need to obtain a free API key from Tavily:
+To enable real-time web search capabilities, you need to obtain an API key from either Tavily or Brave Search:
 
+#### Tavily Search (Default)
 1. Go to https://tavily.com and sign up for a free account
 2. Create an API key from the dashboard
 3. Set the API key as an environment variable:
    ```bash
    export TAVILY_API_KEY="your_api_key_here"
    ```
-   Or add it to a `.env` file in the project root (remember `.env` is ignored by git):
+   Or add it to a `.env` file in the project root:
    ```
    TAVILY_API_KEY=your_api_key_here
    ```
 
-If the API key is not set, the assistant will honestly inform you that search is not configured and will rely on its internal knowledge only.
+#### Brave Search (Alternative)
+1. Go to https://brave.com/search/api/ and sign up for a free account
+2. Create an API key from the dashboard (free tier: 2,000 queries/month)
+3. Set the API key as an environment variable:
+   ```bash
+   export BRAVE_API_KEY="your_api_key_here"
+   ```
+   Or add it to a `.env` file in the project root:
+   ```
+   BRAVE_API_KEY=your_api_key_here
+   ```
+
+#### Switching Between Providers
+To switch between Tavily and Brave Search, add the `search_provider` option to your persona YAML file:
+```yaml
+# Use Tavily (default)
+search_provider: "tavily"
+
+# Or use Brave Search
+search_provider: "brave"
+```
+
+If the API key for the configured provider is not set, the assistant will honestly inform you that search is not configured and will rely on its internal knowledge only.
 
 ### Piper TTS Voices
 
@@ -134,6 +157,4 @@ The architecture is modular:
 - Persona configuration drives behavior
 - Core orchestrates the pipeline without knowing implementation details
 
-## License
-
-MIT
+##
