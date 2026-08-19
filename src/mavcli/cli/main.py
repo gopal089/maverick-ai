@@ -2,11 +2,13 @@
 
 import logging
 import sys
+import time
 from pathlib import Path
 
 import click
 import numpy as np
 import sounddevice as sd
+import webrtcvad
 
 from mavcli.core.llm_engine import LLMEngine
 from mavcli.core.persona_handler import load_persona, create_system_prompt
@@ -115,6 +117,9 @@ def main(text_only: bool, persona: str, model: str, stt_model: str, tts_model: s
         # Fallback to a generic system prompt
         system_prompt = "You are a helpful AI assistant. Keep responses concise and conversational."
 
+    # Initialize VAD for voice activity detection
+    vad = webrtcvad.Vad(mode=0)  # mode 0-3, 0 being least aggressive (more false positives, fewer false negatives)
+
     logger.info("Starting conversation loop...")
     conversation_history = []  # List of dicts for Ollama chat format
 
@@ -131,12 +136,87 @@ def main(text_only: bool, persona: str, model: str, stt_model: str, tts_model: s
             else:
                 # Listening stage
                 print("\rListening...", end='', flush=True)
-                # Record audio from microphone
-                duration = 5  # seconds
+                # Record audio from microphone using VAD
                 sample_rate = 16000
-                audio = sd.rec(int(duration * sample_rate), samplerate=sample_rate, channels=1, dtype='float32')
-                sd.wait()  # Wait for recording to finish
-                audio = audio.flatten()  # Convert to 1D array
+                frame_duration_ms = 30
+                frame_size = int(sample_rate * frame_duration_ms / 1000)
+                max_recording_seconds = 30
+                silence_threshold_seconds = 1.5
+
+                # Audio buffer for recorded speech
+                recorded_frames = []
+                triggered = False
+                speech_start_time = None
+                silence_start_time = None
+                stop_requested = False
+                started_at = time.time()
+
+                def audio_callback(indata, frames, time_info, status):
+                    nonlocal triggered, speech_start_time, silence_start_time, recorded_frames, stop_requested
+                    if status:
+                        logger.debug(f"Audio callback status: {status}")
+                    if stop_requested:
+                        return
+                    # Convert to mono int16 PCM
+                    audio_float = indata[:, 0].copy()
+                    audio_int16 = (audio_float * 32767).astype(np.int16)
+                    # Ensure we have the right number of frames (should be frame_size)
+                    if len(audio_int16) != frame_size:
+                        # If not, we need to handle it (e.g., by buffering)
+                        # For simplicity, we'll assume the blocksize is set correctly.
+                        return
+
+                    # Voice activity detection
+                    try:
+                        is_speech = vad.is_speech(audio_int16.tobytes(), sample_rate)
+                    except Exception as e:
+                        logger.error(f"VAD error: {e}")
+                        return
+
+                    current_time = time.time()
+
+                    if is_speech:
+                        if not triggered:
+                            # Speech started
+                            triggered = True
+                            speech_start_time = current_time
+                            # We already printed "Listening..." and will keep it until done
+                            silence_start_time = None
+                        # Add frame to recording
+                        recorded_frames.append(audio_float.copy())
+                        # Reset silence timer since we have speech
+                        silence_start_time = None
+                    else:
+                        if triggered:
+                            # We are in speech, check if silence has persisted long enough
+                            if silence_start_time is None:
+                                silence_start_time = current_time
+                            elif current_time - silence_start_time >= silence_threshold_seconds:
+                                # Silence threshold reached, request stop
+                                if not stop_requested:  # Guard against multiple triggers
+                                    stop_requested = True
+                                    speech_end_time = current_time
+                                    # Log for debugging
+                                    logger.debug(f"Speech ended at {speech_end_time - started_at:.2f}s, silence duration: {speech_end_time - silence_start_time:.2f}s")
+                                # Do NOT append this frame (the one that triggered the threshold))
+                        # If not triggered, we are waiting for speech, do nothing
+
+                try:
+                    with sd.InputStream(samplerate=sample_rate, channels=1, dtype='float32', blocksize=frame_size, callback=audio_callback, device=3):
+                        while not stop_requested:
+                            time.sleep(0.1)
+                            # Check max duration
+                            if time.time() - started_at > max_recording_seconds:
+                                # Overwrite the listening line with max duration info
+                                print("\rMax duration reached" + " " * 20, end='', flush=True)
+                                break
+                except Exception as e:
+                    logger.error(f"VAD recording error: {e}")
+                # Combine recorded frames
+                if recorded_frames:
+                    audio = np.concatenate(recorded_frames, axis=0)
+                else:
+                    audio = np.array([], dtype=np.float32)
 
                 # Transcribe audio
                 print("\rThinking...", end='', flush=True)
