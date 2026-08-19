@@ -68,13 +68,36 @@ except Exception:
 @click.option('--stt-model', default='medium', help='Whisper model size')
 @click.option('--tts-model', default='en_US-lessac-medium', help='Piper TTS voice model')
 @click.option('--log-level', default='INFO', help='Logging level')
-def main(text_only: bool, persona: str, model: str, stt_model: str, tts_model: str, log_level: str):
+@click.option('--verbose', is_flag=True, help='Enable verbose logging to terminal')
+def main(text_only: bool, persona: str, model: str, stt_model: str, tts_model: str, log_level: str, verbose: bool):
     """Maverick AI - A fully local, personality-customizable voice assistant."""
     # Setup logging
-    logging.basicConfig(
-        level=getattr(logging, log_level.upper()),
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
+    log_level = getattr(logging, log_level.upper())
+
+    # Create logger (root logger)
+    logger = logging.getLogger()
+    logger.setLevel(log_level)
+
+    # Clear any existing handlers
+    if logger.handlers:
+        for handler in logger.handlers:
+            logger.removeHandler(handler)
+
+    # File handler: always on
+    log_file = "logs/mavcli.log"
+    os.makedirs(os.path.dirname(log_file), exist_ok=True)
+    file_handler = logging.FileHandler(log_file)
+    file_handler.setLevel(log_level)
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
+
+    # If verbose, add a stream handler
+    if verbose:
+        stream_handler = logging.StreamHandler(sys.stdout)
+        stream_handler.setLevel(log_level)
+        stream_handler.setFormatter(formatter)
+        logger.addHandler(stream_handler)
 
     logger.info("Starting Maverick AI")
 
@@ -133,9 +156,11 @@ def main(text_only: bool, persona: str, model: str, stt_model: str, tts_model: s
                     break
                 if not user_input:
                     continue
+                if text_only:
+                    print("Thinking...", end='', flush=True)
             else:
                 # Listening stage
-                print("\rListening...", end='', flush=True)
+                print("Listening...")
                 # Record audio from microphone using VAD
                 sample_rate = 16000
                 frame_duration_ms = 30
@@ -208,7 +233,7 @@ def main(text_only: bool, persona: str, model: str, stt_model: str, tts_model: s
                             # Check max duration
                             if time.time() - started_at > max_recording_seconds:
                                 # Overwrite the listening line with max duration info
-                                print("\rMax duration reached" + " " * 20, end='', flush=True)
+                                print("Max duration reached")
                                 break
                 except Exception as e:
                     logger.error(f"VAD recording error: {e}")
@@ -219,13 +244,12 @@ def main(text_only: bool, persona: str, model: str, stt_model: str, tts_model: s
                     audio = np.array([], dtype=np.float32)
 
                 # Transcribe audio
-                print("\rThinking...", end='', flush=True)
+                print("Thinking...")
                 user_input = stt_engine.transcribe(audio, sample_rate)
                 logger.info(f"You said: {user_input}")
                 if not user_input:
                     logger.info("No speech detected, continuing...")
                     # Go back to listening for the next turn
-                    print("\rListening...", end='', flush=True)
                     continue
                 if user_input.lower() in ['exit', 'quit', 'bye']:
                     logger.info("User exited conversation")
@@ -257,9 +281,6 @@ def main(text_only: bool, persona: str, model: str, stt_model: str, tts_model: s
             conversation_history.append({"role": "user", "content": user_input})
 
             # Generate LLM response with system prompt (augmented with search results if applicable)
-            if text_only:
-                print("Thinking...")
-            # Prepare messages for Ollama chat: system prompt + conversation history
             messages = [{"role": "system", "content": augmented_system_prompt}] + conversation_history
             llm_response = llm_engine.chat(messages)
             logger.info(f"Assistant: {llm_response}")
@@ -269,10 +290,13 @@ def main(text_only: bool, persona: str, model: str, stt_model: str, tts_model: s
 
             # Output response
             if text_only:
-                print(f"\nAssistant: {llm_response}")
+                print()  # to end the thinking line
+                print(f"{persona_config.get('name', 'Maverick')}: {llm_response}")
             else:
+                print(f"You: {user_input}")
+                print(f"{persona_config.get('name', 'Maverick')}: {llm_response}")
+                print("Speaking...")
                 # Speaking stage
-                print("\rSpeaking...", end='', flush=True)
                 audio_response = tts_engine.synthesize(llm_response)
                 # Play audio (assuming 22050 Hz for Piper)
                 sd.play(audio_response, samplerate=22050)
