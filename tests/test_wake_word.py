@@ -58,7 +58,8 @@ def main():
     start_time = time.time()
 
     # Initialize audio stream
-    def audio_callback(indata, frames, time, status):
+    def audio_callback(indata, frames, time_info, status):
+        nonlocal last_detection_time
         if status:
             print(f"Audio callback status: {status}", file=sys.stderr)
 
@@ -75,35 +76,29 @@ def main():
         current_score = prediction.get(args.wakeword, 0.0)
         current_time = time.time()
 
-        # Debounce logic: only trigger if:
-        # 1. Score is above threshold, AND
-        # 2. Either we've never detected before OR score dropped below threshold since last detection
-        # 3. AND minimum cooldown period has passed (1 second)
-        if current_score >= args.sensitivity:
-            # Check if we should allow a new detection
-            should_detect = False
-            if last_detection_time is None:
-                # First detection ever
-                should_detect = True
-            elif current_score < args.sensitivity:
-                # Score dropped below threshold - reset for next detection
-                should_detect = False  # Actually, we'll handle this in the else clause below
-            elif (current_time - last_detection_time) >= COOLDOWN_SECONDS:
-                # Enough time has passed since last detection
-                should_detect = True
+        # Debounce logic:
+        # - Only trigger detection when score crosses ABOVE threshold
+        # - Prevent re-triggering while score remains above threshold
+        # - Require score to drop BELOW threshold before allowing next detection
+        # - Additionally enforce minimum cooldown time between detections
 
-            if should_detect:
-                print("\n" + "="*60)
-                print(f"🎉 Wake word '{args.wakeword}' detected! "
-                      f"(score: {current_score:.3f})")
-                print("="*60 + "\n")
-                last_detection_time = current_time
-                # In a real implementation, this would trigger the VAD-based listening
-                # For this test, we just continue listening
-        else:
-            # Score dropped below threshold - we're ready for next detection
-            # (no action needed, last_detection_time will be checked on next frame)
-            pass
+        if current_score >= args.sensitivity and last_detection_time is not None:
+            # Score is above threshold - check if we should ignore due to debounce/cooldown
+            time_since_last_detection = current_time - last_detection_time
+            if time_since_last_detection < COOLDOWN_SECONDS:
+                # Still in cooldown period, ignore this detection
+                return
+
+        if current_score >= args.sensitivity:
+            # Score is at or above threshold - trigger detection
+            print("\n" + "="*60)
+            print(f"🎉 Wake word '{args.wakeword}' detected! "
+                  f"(score: {current_score:.3f})")
+            print("="*60 + "\n")
+            last_detection_time = current_time
+            # In a real implementation, this would trigger the VAD-based listening
+            # For this test, we just continue listening
+        # else: score is below threshold, waiting for next wake word utterance
 
     try:
         audio_stream = sd.InputStream(
